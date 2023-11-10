@@ -6,14 +6,8 @@ DATETIME_FORMAT = "%Y-%m-%d %H:%M:%S"
 
 
 @trigger(events=["s3"])
-@conda_base(
-    libraries={
-        "pandas": "1.4.2",
-        "pyarrow": "11.0.0",
-        "numpy": "1.22.0",
-        "scikit-learn": "1.1.2",
-    }
-)
+@conda_base(libraries={"conda-forge::xgboost": '1.5.1', "conda-forge::scikit-learn": '1.1.2', "conda-forge::pandas": '1.4.2', 
+"conda-forge::pyarrow": '14.0.1.'})
 @project(name="taxi_fare_prediction")
 class TaxiFarePrediction(FlowSpec):
     data_url = Parameter("data_url", default=URL)
@@ -68,15 +62,18 @@ class TaxiFarePrediction(FlowSpec):
         # In practice, you want split time series data in more sophisticated ways and run backtests.
         self.X = self.df["trip_distance"].values.reshape(-1, 1)
         self.y = self.df["total_amount"].values
-        self.next(self.linear_model)
+        self.next(self.xgboost_model)
 
     @step
-    def linear_model(self):
-        "Fit a single variable, linear model to the data."
-        from sklearn.linear_model import LinearRegression
+    def xgboost_model(self):
+        "Fit a single variable, xgboost model to the data."
+        import xgboost
+        from sklearn.model_selection import cross_val_score
+        from sklearn.model_selection import RepeatedKFold
+        from xgboost import XGBRegressor
 
         # TODO: Play around with the model if you are feeling it.
-        self.model = LinearRegression()
+        self.model = XGBRegressor()
 
         self.next(self.validate)
 
@@ -122,9 +119,15 @@ class TaxiFarePrediction(FlowSpec):
     @card(type="corise")
     @step
     def validate(self):
+        from numpy import absolute
         from sklearn.model_selection import cross_val_score
+        from sklearn.model_selection import RepeatedKFold
 
-        self.scores = cross_val_score(self.model, self.X, self.y, cv=5)
+        # define model evaluation method
+        cv = RepeatedKFold(n_splits=10, n_repeats=3, random_state=1)
+        # evaluate model
+        self.scores = cross_val_score(self.model, self.X, self.y, scoring='r2', cv=cv, n_jobs=-1)
+        
         current.card.append(Markdown("# Taxi Fare Prediction Results"))
         current.card.append(
             Table(
